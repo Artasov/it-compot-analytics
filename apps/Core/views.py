@@ -1,4 +1,5 @@
 import logging
+from asyncio import sleep
 
 from django.conf import settings
 from django.db import connections
@@ -6,6 +7,7 @@ from django.http import HttpResponse
 from django_minio_backend import MinioBackend
 from django_redis import get_redis_connection
 
+from apps.Core.services.djrediser import DJRediser
 from apps.Core.tasks.test_tasks import test_periodic_task
 
 log = logging.getLogger('base')
@@ -39,7 +41,7 @@ log = logging.getLogger('base')
 #     return render(request, 'Core/stupid_auth.html', {'form': form})
 
 
-def health_test(request) -> HttpResponse:
+async def health_test(request) -> HttpResponse:
     # Celery check
     test_periodic_task.delay('param1')
 
@@ -52,6 +54,13 @@ def health_test(request) -> HttpResponse:
     except Exception as e:
         log.error(f'DB have not yet come to life: {str(e)}')
         return HttpResponse(f"DB error: {str(e)}", status=500)
+    try:
+        cache = DJRediser.cache('health_test_cache')
+    except DJRediser.CacheByNameNotFound:
+        await sleep(1)
+        cache = DJRediser.cache('health_test_cache', 'and cache ok...')
+        log.info('cache saved')
+
     if not settings.DEV:
         minio_available = MinioBackend().is_minio_available()  # An empty string is fine this time
         if not minio_available:
@@ -62,5 +71,5 @@ def health_test(request) -> HttpResponse:
             log.error(f'base_url = {MinioBackend().base_url}')
             log.error(f'base_url_external = {MinioBackend().base_url_external}')
             log.error(f'HTTP_CLIENT = {MinioBackend().HTTP_CLIENT}')
-            return HttpResponse(f"MINIO ERROR", status=500)
-    return HttpResponse("OK")
+            return HttpResponse(f'MINIO ERROR', status=500)
+    return HttpResponse(f'OK {cache}')
